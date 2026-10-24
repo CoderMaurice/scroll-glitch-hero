@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scroll Glitch Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --surface: #ffffff;
+    --ink: #1b1f24;
+    --muted: #5f6872;
+    --line: #e4e2dd;
+    --accent: #2f6df6;
+    --bar: #c9d3de;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 17px/1.8 Inter, "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* ---------- header ---------- */
+  .nav {
+    position: fixed; inset: 0 0 auto; height: 64px; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 clamp(16px, 5vw, 64px);
+    border-bottom: 1px solid transparent;
+    transition: background .35s, border-color .35s, backdrop-filter .35s;
+  }
+  .nav.solid {
+    background: color-mix(in srgb, var(--bg) 84%, transparent);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border-color: var(--line);
+  }
+  .logo { font: 600 19px/1 Inter, sans-serif; letter-spacing: .2em; color: var(--ink); text-decoration: none; }
+  .cta {
+    background: #111; color: #fff; border-radius: 999px; padding: 9px 16px;
+    font: 500 14px/1 Inter, sans-serif; text-decoration: none;
+  }
+
+  /* ---------- hero ---------- */
+  .hero {
+    position: fixed; inset: 0; z-index: 2;
+    background: linear-gradient(#dcdedf, #eceae5 45%, #c8ced5);
+  }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .hint {
+    position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: none; border: 0; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    color: rgba(255,255,255,.95);
+    font: 500 17px/1 "Cormorant Garamond", Georgia, serif; letter-spacing: .05em;
+    text-shadow: 0 1px 10px rgba(25,35,48,.45);
+  }
+  .hint svg { animation: bob 1.8s ease-in-out infinite; filter: drop-shadow(0 1px 6px rgba(25,35,48,.4)); }
+  @keyframes bob { 50% { transform: translateY(-5px); } }
+  .hero-fallback-title { display: none; }
+
+  /* ---------- scroll stage (the mechanics) ---------- */
+  /* One viewport of extra scroll room: the transition "consumes" it. */
+  .stage::after { content: ""; display: block; height: 100vh; height: 100dvh; }
+  /* While the hero is up / animating, the article is pinned under it. */
+  .container { position: sticky; top: 0; }
+  /* After the transition, the article sits one viewport down and scrolls normally. */
+  .stage:not([data-entering]):not([data-running]) > .container { position: relative; top: 100vh; top: 100dvh; }
+  .stage[data-entering] .main {
+    opacity: var(--reveal, 0);
+    transform: translateY(calc((1 - var(--reveal, 0)) * 40vh));
+  }
+
+  /* ---------- article ---------- */
+  .main { max-width: 760px; margin: 0 auto; padding: 112px 16px 140px; }
+  .eyebrow { font: 500 13px/1 Inter, sans-serif; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  h1 { font: 600 clamp(32px, 5vw, 46px)/1.2 "Cormorant Garamond", "Songti SC", serif; margin: 14px 0 22px; letter-spacing: -.01em; }
+  h2 { font: 600 28px/1.3 "Cormorant Garamond", "Songti SC", serif; margin: 56px 0 14px; }
+  p { margin: 0 0 18px; color: #2d333a; }
+  p strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--accent); text-decoration: none; }
+  .meta { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 14px; margin-bottom: 36px; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px 22px 14px; margin: 30px 0; }
+  .card h3 { font: 600 14px/1 Inter, sans-serif; margin-bottom: 16px; }
+  .bars { display: grid; gap: 10px; }
+  .bar { display: grid; grid-template-columns: 110px 1fr 46px; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+  .bar .track { height: 10px; border-radius: 5px; background: #f0efeb; overflow: hidden; }
+  .bar .fill { height: 100%; width: var(--v); background: var(--bar); border-radius: 5px; transform-origin: left; transform: scaleX(0); transition: transform 1.1s cubic-bezier(.2,.7,.2,1) .15s; }
+  .bar.ours { color: var(--ink); font-weight: 500; }
+  .bar.ours .fill { background: var(--accent); }
+  .bar .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rv.in .fill { transform: scaleX(1); }
+
+  .rv { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .rv.in { opacity: 1; transform: none; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 26px 0; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .tile b { display: block; font: 600 30px/1.1 "Cormorant Garamond", serif; }
+  .tile span { font-size: 13px; color: var(--muted); }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding: 40px 0 0; border-top: 1px solid var(--line); margin-top: 64px; }
+
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    .bar { grid-template-columns: 82px 1fr 40px; }
+    .grid2 { grid-template-columns: 1fr; }
+  }
+
+  /* ---------- fallback: reduced motion or no WebGL2 ---------- */
+  .static .hero { position: relative; height: 100vh; height: 100dvh; }
+  .static .stage::after { display: none; }
+  .static .stage > .container { position: static !important; }
+  .static .main { opacity: 1 !important; transform: none !important; }
+  .no-gl .hero-fallback-title {
+    display: grid; place-items: center; position: absolute; inset: 0;
+    font: 600 clamp(56px, 11vw, 160px)/1 "Cormorant Garamond", serif; letter-spacing: .12em; color: #fff;
+    text-shadow: 0 4px 30px rgba(25,35,48,.35);
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="logo" href="#">MERIDIAN</a>
+  <a class="cta" href="#">立即体验</a>
+</header>
+
+<section class="hero" aria-label="Hero">
+  <canvas id="hero-canvas"></canvas>
+  <div class="hero-fallback-title">MERIDIAN</div>
+  <button class="hint" type="button" aria-label="Scroll to explore">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14l6-6 6 6"/></svg>
+    Scroll to explore
+  </button>
+</section>
+
+<div class="stage" data-entering>
+  <div class="container">
+    <main class="main">
+      <div class="eyebrow">Research · 2026.10</div>
+      <h1>Introducing Meridian 1.0 Pro</h1>
+      <div class="meta"><span>Meridian Team</span><span>阅读约 6 分钟</span></div>
+
+      <p>今天我们发布 <strong>Meridian 1.0 Pro</strong>——系列中第一个模型，也是迄今为止我们能力最强的开放权重模型，支持百万级上下文窗口。它在编程、三维创作、金融研究等智能体任务上都有显著提升。</p>
+      <p>同时发布的还有 <strong>Meridian 1.0 Flash</strong>，在保持接近 Pro 质量的前提下，推理速度提升 2–3 倍，适合对响应时延敏感的交互场景。</p>
+      <p>两个模型即日起在 <a href="#">网页端</a>、<a href="#">桌面应用</a> 与 <a href="#">API</a> 上线。完整权重将在下月开放下载。</p>
+
+      <div class="card rv">
+        <h3>综合基准（越高越好）</h3>
+        <div class="bars">
+          <div class="bar ours"><span>Meridian 1.0 Pro</span><div class="track"><div class="fill" style="--v:82%"></div></div><span class="num">82.4</span></div>
+          <div class="bar"><span>Model A</span><div class="track"><div class="fill" style="--v:77%"></div></div><span class="num">77.1</span></div>
+          <div class="bar"><span>Model B</span><div class="track"><div class="fill" style="--v:71%"></div></div><span class="num">70.8</span></div>
+          <div class="bar"><span>Model C</span><div class="track"><div class="fill" style="--v:64%"></div></div><span class="num">63.9</span></div>
+        </div>
+      </div>
+
+      <h2 class="rv">推进开放智能的前沿</h2>
+      <p class="rv">我们重新设计了训练数据的配比与长程强化学习流程，让模型在数百个下游领域里都能稳定地规划、调用工具与自我校验。相比上一代，它在多步任务中的中途放弃率下降了近一半。</p>
+      <p class="rv">在长时程编程任务里，Meridian 能连续工作数小时，维护跨越数十个文件的上下文，并在测试失败时主动回溯修改方案，而不是简单地重试。</p>
+
+      <div class="grid2 rv">
+        <div class="tile"><b>1M</b><span>上下文窗口（tokens）</span></div>
+        <div class="tile"><b>2.6×</b><span>Flash 版本推理加速</span></div>
+      </div>
+
+      <h2 class="rv">编程</h2>
+      <p class="rv">从单文件脚本到大型代码库重构，Meridian 覆盖完整的软件工程链路：阅读需求、拆解任务、编写与运行测试、提交可审阅的改动。在游戏引擎与三维工具链上，它也能直接生成可运行的场景与脚本。</p>
+      <p class="rv">我们特别优化了它在终端环境中的表现：理解构建日志、定位依赖冲突、在受限权限下安全地操作文件系统。</p>
+
+      <h2 class="rv">金融研究</h2>
+      <p class="rv">面对财报、电话会纪要与行业数据，Meridian 能交叉核对数字来源，标注不确定性，并把结论组织成可直接交付的研究备忘录。</p>
+      <p class="rv">往回滚动到文章顶部，你会看到转场动画反向播放，山景重新从碎片中拼合回来。</p>
+
+      <footer>© 2026 Meridian · 这是一个转场动效演示页面</footer>
+    </main>
+  </div>
+</div>
+
+<script>
+/* Article: fade sections in as they enter the viewport. */
+(() => {
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }), { rootMargin: '0px 0px -12% 0px' });
+  document.querySelectorAll('.rv').forEach(el => io.observe(el));
+})();
+</script>
+
+<script>
+(() => {
+  const CONFIG = {
+    title: 'MERIDIAN',
+    subtitle: 'MERIDIAN 1.0 PRO',
+    tagline: 'Advancing open intelligence',
+    duration: 900,      // ms the transition takes
+    cooldown: 140,      // ms of input lock after it finishes
+    glitchAmount: 0.6,  // 0..1, how torn the frame gets
+  };
+  // ?slow=10 plays the transition 10x slower, for inspecting frames.
+  CONFIG.duration *= Math.max(1, +new URLSearchParams(location.search).get('slow') || 1);
+
+  const $ = s => document.querySelector(s);
+  const root = document.documentElement;
+  const stage = $('.stage'), main = $('.main'), hero = $('.hero'), nav = $('.nav'), hint = $('.hint');
+  const canvas = $('#hero-canvas');
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+  const ss = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const gl = canvas.getContext('webgl2', {
+    alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+  });
+  if (!gl) { root.classList.add('static', 'no-gl'); stage.removeAttribute('data-entering'); return; }
+
+  /* =====================================================================
+     Shaders
+     ===================================================================== */
+  const VERT = `#version 300 es
+  in vec2 p; out vec2 vUv;
+  void main(){ vUv = p*.5+.5; gl_Position = vec4(p,0.,1.); }`;
+
+  // Pass 1: procedural misty mountains. Alpha carries front-wisp density,
+  // so the title composited later can sit *inside* the fog.
+  const WORLD = `#version 300 es
+  precision highp float;
+  in vec2 vUv; out vec4 o;
+  uniform vec2 res; uniform float T; uniform vec2 mouse;
+  const vec3 FOG = vec3(.90,.915,.925);
+
+  float hash(vec2 p){ p = fract(p*vec2(127.1,311.7)); p += dot(p,p+34.23); return fract(p.x*p.y); }
+  float noise(vec2 p){
+    vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
+    return mix(mix(hash(i),hash(i+vec2(1,0)),u.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);
+  }
+  const mat2 R = mat2(1.6,1.2,-1.2,1.6);
+  float fbm(vec2 p){ float s=0., a=.5; for(int i=0;i<5;i++){ s+=a*noise(p); p=R*p; a*=.5; } return s; }
+  float fbm3(vec2 p){ float s=0., a=.5; for(int i=0;i<3;i++){ s+=a*noise(p); p=R*p; a*=.5; } return s; }
+  float ridge(float x, float layer){
+    float s=0., a=.55, f=1.;
+    for(int k=0;k<5;k++){
+      float n = 1.-abs(noise(vec2(x*f, layer*7.1+float(k)*3.3))*2.-1.);
+      s += a*n*n; f *= 2.03; a *= .48;
+    }
+    return s-.45;
+  }
+  float rock2(vec2 p){
+    float s=0., a=.55;
+    for(int k=0;k<4;k++){ float n = 1.-abs(noise(p)*2.-1.); s += a*n*n; p = R*p; a *= .5; }
+    return s;
+  }
+
+  vec3 sky(float x, float y){
+    vec3 c = mix(vec3(.87,.885,.895), vec3(.95,.935,.905), smoothstep(.3,.72,y));
+    c = mix(c, vec3(.80,.815,.83), smoothstep(.78,1.,y));
+    float s = fbm(vec2(x*1.1 + T*.004, y*5.5));
+    c = mix(c, vec3(.70,.73,.76), smoothstep(.5,.82,s)*smoothstep(.72,.98,y)*.75);
+    c = mix(c, vec3(.985,.975,.955), smoothstep(.55,.85,fbm3(vec2(x*2.2 - T*.003, y*8.)))*smoothstep(.58,.82,y)*.55);
+    return c;
+  }
+
+  void main(){
+    float asp = res.x/res.y;
+    float x = (vUv.x-.5)*asp, y = vUv.y;
+    vec3 col = sky(x, y);
+    float aa = 1.5/res.y;
+
+    for(int i=0;i<5;i++){
+      float fi = float(i), d = fi/4.;           // 0 = far, 1 = near
+      float base = mix(.60,.10,d);
+      float amp  = mix(.13,.40,d);
+      float fq   = mix(2.4,1.05,d);
+      float sx = x*fq + fi*13.7 + mouse.x*(.03+.10*d);
+      float r = ridge(sx, fi);
+      float top = base + amp*r + mouse.y*.012*d;
+      float below = top - y;
+      if(below > -aa){
+        // Crest lighting comes from the silhouette slope; below it, from a 2D
+        // ridged field so faces and gullies read as rock instead of columns.
+        float slope = (ridge(sx+.004, fi) - r)/.004*amp*fq;
+        float crest = smoothstep(-.9,.9,slope);
+        vec2 tp = vec2(sx*5.5 + y*4.5, y*1.7 + fi*9.);      // screen-anchored, stretched into diagonal gullies
+        float f0 = rock2(tp), fx = rock2(tp + vec2(.03,0.));
+        float face = smoothstep(-.06,.06, fx-f0);
+        float lit = mix(crest, face, smoothstep(.0,.025,below));
+        vec3 shade = mix(vec3(.44,.50,.57), vec3(.07,.11,.17), d);
+        vec3 light = mix(vec3(.82,.85,.88), vec3(.66,.72,.79), d);
+        vec3 rock = mix(shade, light, lit*(.5 + .5*f0));
+        rock = mix(rock, light*1.1, (1.-smoothstep(0.,.03,below))*crest*.55);   // snowy crest
+        float haze = mix(.62,.0,d) + smoothstep(.0,.2,below)*mix(.4,.72,d);   // atmosphere + foot dissolving
+        rock = mix(rock, FOG, clamp(haze,0.,1.));
+        col = mix(col, rock, 1.-smoothstep(-aa, aa, -below));
+      }
+      // sea of clouds rolling at the foot of this ridge
+      float cy = base + amp*.12;
+      vec2 cp = vec2(x*1.3 + T*.011*(1.+fi*.6) + fi*4.1, (y-cy)*3.6 + fi*2.3);
+      float c = fbm(cp + .8*fbm3(cp*.6 - vec2(T*.009, 0.)));
+      float mist = smoothstep(.3,.78, c + (cy-y)*2.6 - .04);
+      col = mix(col, FOG, mist*mix(.8,.95,d));
+    }
+
+    vec2 fp = vec2(x*1.1 + T*.028, y*2.4 - T*.004);
+    float fw = fbm(fp + .6*fbm3(fp*1.7 - T*.02));
+    float front = smoothstep(.5,.86,fw)*(1.-smoothstep(.12,.7,y))*.8 + smoothstep(.64,.95,fw)*.16;
+    o = vec4(col, clamp(front,0.,1.));
+  }`;
+
+  // Pass 2: composite title + the scroll-exit glitch, straight to screen.
+  // Alpha dissolves in blocks so the real DOM article shows through.
+  const EXIT = `#version 300 es
+  precision highp float;
+  in vec2 vUv; out vec4 o;
+  uniform sampler2D world, titleTex, codeTex;
+  uniform vec2 size;                      // CSS px
+  uniform float strength, phase, T;
+  uniform float codeLines, codeWidth, lineH, amount;
+  const vec3 FOG   = vec3(.90,.915,.925);
+  const vec3 STEEL = vec3(.58,.70,.77);
+
+  float hash12(vec2 p){ vec3 q = fract(p.xyx*.1031); q += dot(q, q.yzx+33.33); return fract((q.x+q.y)*q.z); }
+  float vnoise(vec2 p){
+    vec2 i = floor(p), f = fract(p), u = f*f*(3.-2.*f);
+    return mix(mix(hash12(i),hash12(i+vec2(1,0)),u.x), mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),u.x), u.y);
+  }
+  float luma(vec3 c){ return dot(c, vec3(.299,.587,.114)); }
+
+  vec3 sceneAt(vec2 uv){
+    uv = clamp(uv, 0., 1.);
+    vec4 w = texture(world, uv);
+    vec4 t = texture(titleTex, uv);       // premultiplied
+    return mix(w.rgb*(1.-t.a) + t.rgb, FOG, w.a*.85);
+  }
+
+  // One row of variable-width cells; a patchy subset of them tears sideways.
+  // cfg = (row height, min width, max width, max shift), all in CSS px; density scales how many cells tear.
+  struct Tear { float on; float shift; float r; float x0; vec2 local; vec2 dim; vec2 id; };
+
+  Tear tear(vec2 px, float tick, vec4 cfg, float density, float salt){
+    float row = floor(px.y/cfg.x);
+    float rr = hash12(vec2(row, salt));
+    float w = mix(cfg.y, cfg.z, rr*rr)*clamp(size.x/1000., .5, 1.);
+    float gx = px.x/w + rr*13.;
+    vec2 id = vec2(floor(gx), row);
+    float r = hash12(id + vec2(tick*1.618, salt));
+    float storm = vnoise(px/vec2(260.,140.) + vec2(tick*.37, salt));
+    float want = density*strength*amount*mix(.2,1.5,storm);
+    float on = 1.-smoothstep(want-.04, want+.04, r);
+    vec2 f = vec2(fract(gx), fract(px.y/cfg.x));
+    vec2 edge = min(f, 1.-f)*vec2(w, cfg.x);
+    on *= smoothstep(0., 1., min(edge.x, edge.y));
+    float k = hash12(id + vec2(tick, 7.+salt));
+    float s = k*2.-1.;
+    float shift = sign(s)*pow(abs(s), 1.6)*cfg.w*on*strength;
+    return Tear(on, shift, k, (id.x - rr*13.)*w, f*vec2(w, cfg.x), vec2(w, cfg.x), id);
+  }
+
+  // Some wide tears carry a line of source code on a tinted plate.
+  vec3 printCode(vec3 base, Tear t, float tick, vec2 px){
+    float use = t.on*step(.55, t.r);
+    if(use <= .001) return base;
+    float line = floor(hash12(t.id + vec2(floor(tick*.5), 41.))*codeLines);
+    float ty = t.local.y - (t.dim.y - lineH)*.5;               // 0..lineH, upward
+    float band = smoothstep(0.,1.,ty)*(1.-smoothstep(lineH-1.,lineH,ty));
+    use *= band;
+    float tx = t.local.x + hash12(t.id + 5.)*700. + tick*6.;   // text crawls as it flickers
+    vec2 cuv = vec2(fract(tx/codeWidth), (line*lineH + lineH - clamp(ty,.5,lineH-.5))/(codeLines*lineH));
+    float glyph = texture(codeTex, cuv).a*band;
+    vec2 centre = vec2(t.x0 + t.dim.x*.5 + t.shift, px.y - t.local.y + t.dim.y*.5)/size;
+    float light = smoothstep(.3,.72, luma(sceneAt(centre)));
+    vec3 plate = mix(STEEL*.25, STEEL*1.15, light);
+    vec3 ink = light > .5 ? vec3(.06,.13,.18) : vec3(.86,.93,.96);
+    vec3 c = mix(mix(base, plate, .55), ink, glyph*.95);
+    return mix(base, c, use*smoothstep(0.,.2,strength));
+  }
+
+  // Blocks give way roughly bottom-first in ragged patches; once open they stay open.
+  float dissolve(vec2 px){
+    float open = smoothstep(.35,.95,phase);
+    float rowH = mix(12.,6.,amount);
+    float row = floor(px.y/rowH);
+    float w = mix(30.,110.,hash12(vec2(row,91.)))*clamp(size.x/1000., .5, 1.);
+    vec2 id = vec2(floor(px.x/w + hash12(vec2(row,17.))), row);
+    float blot = vnoise(px/vec2(170.,95.) + 4.);
+    float order = .55*hash12(id + 29.) + .3*blot + .25*vUv.y - .05;
+    return 1.-smoothstep(order-.08, order+.08, open*1.12);
+  }
+
+  void main(){
+    vec2 px = vUv*size;
+    float tick = floor(phase*30.);
+    Tear thin = tear(px, tick, vec4(mix(8.,4.,amount), 20., 140., 110.), .9, 3.);
+    Tear wide = tear(px, floor(tick*.5), vec4(mix(34.,20.,amount), 110., 300., 170.), .38, 11.);
+    vec2 sp = px + vec2(thin.shift + wide.shift, 0.);
+    // A few wide tears freeze a single source column across the cell: a horizontal smear.
+    sp.x = mix(sp.x, wide.x0 + wide.dim.x*.5 + wide.shift, step(.82, wide.r)*wide.on);
+    vec2 uv = sp/size;
+    vec2 ca = vec2((thin.on + wide.on)*strength*2.5/size.x, 0.);
+    vec3 col = vec3(sceneAt(uv + ca).r, sceneAt(uv).g, sceneAt(uv - ca).b);
+    float act = max(thin.on, wide.on);
+    if(act > .001){
+      vec3 ghost = sceneAt((px + vec2((thin.shift + wide.shift)*1.8, 0.))/size);
+      col = mix(col, ghost, act*strength*.18);
+      float flash = step(.86, thin.r)*thin.on*strength*.3;
+      col = mix(col, STEEL*abs(luma(ghost)-luma(col))*1.6, flash);
+    }
+    col = printCode(col, wide, tick, px);
+    vec2 q = vUv-.5;
+    col = (col + (hash12(gl_FragCoord.xy + fract(T)*61.)-.5)*.018)*(1.-dot(q,q)*.28);
+    float a = dissolve(px);
+    o = vec4(col*a, a);
+  }`;
+
+  /* =====================================================================
+     GL plumbing
+     ===================================================================== */
+  function program(fs) {
+    const make = (type, src) => {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    };
+    const p = gl.createProgram();
+    gl.attachShader(p, make(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(p, make(gl.FRAGMENT_SHADER, fs));
+    gl.bindAttribLocation(p, 0, 'p');
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {};
+    for (let i = 0, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i < n; i++) {
+      const { name } = gl.getActiveUniform(p, i);
+      u[name] = gl.getUniformLocation(p, name);
+    }
+    return { p, u };
+  }
+  function texture(unit, wrap = gl.CLAMP_TO_EDGE) {
+    const t = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+  function upload(unit, tex, source, flip) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, flip);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, flip);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  }
+
+  let worldProg, exitProg;
+  try { worldProg = program(WORLD); exitProg = program(EXIT); }
+  catch (err) { console.error(err); root.classList.add('static', 'no-gl'); stage.removeAttribute('data-entering'); return; }
+
+  gl.bindVertexArray(gl.createVertexArray());
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const worldTex = texture(0), titleTex = texture(1), codeTex = texture(2, gl.REPEAT);
+  const worldFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, worldFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, worldTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  /* ---------- code-line texture (what shows up inside the tears) ---------- */
+  const CODE = [
+    'const session = await meridian.connect({ model: "1.0-pro" });',
+    'for (const step of plan.steps) await agent.run(step);',
+    'const ctx = await workspace.index({ depth: 3, ignore: [".git"] });',
+    'if (result.failed) return planner.backtrack(result.trace);',
+    'tokens.push(...encoder.encode(chunk)); window.slide(1 << 20);',
+    'export function reconcile(prev, next) { return diff(prev, next); }',
+    'await tools.call("terminal", { cmd: "npm test -- --watch=false" });',
+    '0x3F2A  0x91C4  0x07E1  0xB5D0  0x4C8E  0xE213  0x6A9F  0x15B7',
+    'let attn = softmax(q.matmul(k.T()).div(Math.sqrt(d)));',
+    'stream.on("delta", d => buffer.write(d.text)); stream.resume();',
+    '01101101 01100101 01110010 01101001 01100100 01101001 01100001 01101110',
+    'const ledger = await finance.pull({ ticker, quarters: 8 });',
+    'gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); requestAnimationFrame(tick);',
+    'checkpoint.save({ step, loss: loss.item(), lr: sched.lr });',
+    'if (!verify(patch)) queue.unshift({ ...task, retries: n + 1 });',
+    'const mesh = scene.add(new Terrain({ seed: 9137, octaves: 5 }));',
+    'heartbeat = setInterval(() => ping(peer), 1500);',
+    'assert.deepEqual(await run(fixture), expected, "golden mismatch");',
+    'const plan = await model.think(goal, { budget: "long-horizon" });',
+    'cache.set(key, await fetchShard(key)); metrics.hit.inc();',
+    'yield* walk(tree, node => node.kind === "CallExpression");',
+    'const ok = await review(diff, { rules: repo.lint, strict: true });',
+    '[ 12.04s ] compiled 1,284 modules · 0 errors · 3 warnings',
+    'kv.evict(lru.oldest()); kv.put(seq, layer, block);',
+  ];
+  const LINE_H = 16, CODE_W = 1024;   // CSS px; texture is drawn at 2x
+  function buildCodeTexture() {
+    const c = document.createElement('canvas');
+    c.width = CODE_W * 2; c.height = CODE.length * LINE_H * 2;
+    const x = c.getContext('2d');
+    x.font = '500 22px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+    x.fillStyle = '#fff'; x.textBaseline = 'middle';
+    CODE.forEach((_, r) => {
+      let line = '', k = 0;
+      while (x.measureText(line).width < c.width + 200) line += CODE[(r + 7 * k++) % CODE.length] + '    ';
+      x.fillText(line, 0, r * LINE_H * 2 + LINE_H);
+    });
+    upload(2, codeTex, c, false);
+  }
+
+  /* ---------- title texture ---------- */
+  function drawTracked(ctx, text, cx, y, tracking) {
+    const widths = [...text].map(ch => ctx.measureText(ch).width);
+    const total = widths.reduce((a, b) => a + b, 0) + tracking * (text.length - 1);
+    let x = cx - total / 2;
+    [...text].forEach((ch, i) => { ctx.fillText(ch, x, y); x += widths[i] + tracking; });
+  }
+  function buildTitleTexture(w, h, dpr) {
+    const c = document.createElement('canvas');
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    const x = c.getContext('2d');
+    x.scale(dpr, dpr);
+    x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+    const size = Math.max(54, Math.min(w * 0.13, 176));
+    const cy = h * 0.47;
+    x.fillStyle = '#fff';
+    x.shadowColor = 'rgba(22,34,48,.38)'; x.shadowBlur = size * 0.28; x.shadowOffsetY = size * 0.03;
+    x.font = `500 ${size}px "Cormorant Garamond", Georgia, serif`;
+    drawTracked(x, CONFIG.title, w / 2, cy, size * 0.12);
+    x.shadowBlur = 16; x.shadowOffsetY = 1;
+    const small = Math.max(11, Math.min(size * 0.11, 16));
+    x.font = `500 ${small}px Inter, system-ui, sans-serif`;
+    x.globalAlpha = .95;
+    drawTracked(x, CONFIG.subtitle, w / 2, cy + size * 0.42, small * 0.5);
+    x.globalAlpha = .9;
+    x.font = `italic 500 ${small * 1.45}px "Cormorant Garamond", Georgia, serif`;
+    drawTracked(x, CONFIG.tagline, w / 2, cy + size * 0.42 + small * 2.4, 0.5);
+    x.globalAlpha = .7; x.shadowBlur = 0;
+    x.fillRect(w / 2 - 24, cy + size * 0.2, 48, 1);
+    upload(1, titleTex, c, true);
+  }
+
+  /* ---------- sizing ---------- */
+  let W = 1, H = 1, worldW = 1, worldH = 1;
+  function resize() {
+    W = innerWidth; H = innerHeight;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    // The world is soft (fog, haze); render it below CSS resolution to keep it cheap.
+    const ws = Math.min(0.8, Math.sqrt(900000 / (W * H)));
+    worldW = Math.max(1, Math.round(W * ws)); worldH = Math.max(1, Math.round(H * ws));
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, worldTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, worldW, worldH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    buildTitleTexture(W, H, dpr);
+    lastWorld = 0;
+  }
+
+  /* =====================================================================
+     The scroll-triggered transition
+     ===================================================================== */
+  let progress = 0, target = 0, running = false, t0 = 0, unlockAt = 0;
+  const exit = { strength: 0, phase: 0, reveal: 0 };
+
+  function computeExit(p) {
+    exit.phase = p;
+    // Fast attack, a swell through the middle, then it calms as the article lands.
+    const env = ss(0, .1, p) * (.5 + .5 * ss(.05, .45, p)) * (1 - ss(.7, 1, p));
+    // Per-tick stutter, stepped in sync with the shader's tick so it reads as digital.
+    const tick = Math.floor(p * 30);
+    const rand = ((Math.sin(tick * 91.7) * 43758.5453) % 1 + 1) % 1;
+    const stutter = .75 + .25 * rand;
+    exit.strength = p > 0 && p < 1 ? env * stutter : 0;
+    exit.reveal = ss(.3, .95, p);
+  }
+  const stageTop = () => stage.getBoundingClientRect().top + scrollY;
+  const locked = now => running || now < unlockAt;
+
+  // Pin scroll to where the transition started until it finishes,
+  // then jump to the resting position (top of hero, or top of article).
+  function hold() {
+    const y = stageTop() + (running ? 1 - target : target) * H;
+    if (Math.abs(scrollY - y) > .5) scrollTo({ top: y, behavior: 'instant' });
+  }
+  function apply() {
+    computeExit(progress);
+    stage.style.setProperty('--reveal', exit.reveal.toFixed(4));
+    stage.toggleAttribute('data-entering', progress < 1);
+    stage.toggleAttribute('data-running', running);
+    hero.style.opacity = String(1 - exit.reveal);
+    hero.style.visibility = progress >= 1 && !running ? 'hidden' : '';
+    hint.style.opacity = String(1 - ss(0, .12, progress));
+    main.inert = exit.reveal < 1 && progress < 1;
+    nav.classList.toggle('solid', exit.reveal >= .5);
+  }
+  function start(to) {
+    target = to; running = true; t0 = performance.now();
+    apply(); hold(); loop();
+  }
+
+  addEventListener('scroll', () => {
+    if (root.classList.contains('static')) return;
+    const now = performance.now();
+    if (locked(now)) return void hold();
+    const off = scrollY - stageTop();
+    if (progress === 0 && off >= 8) start(1);
+    else if (progress === 1 && off <= H - 8) start(0);
+  }, { passive: true });
+
+  const KEYS = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '];
+  const block = e => {
+    if (!locked(performance.now()) || e.ctrlKey || e.metaKey) return;
+    if (e instanceof KeyboardEvent && !KEYS.includes(e.key)) return;
+    if (e.cancelable) e.preventDefault();
+  };
+  for (const t of ['wheel', 'touchmove', 'keydown']) addEventListener(t, block, { passive: false, capture: true });
+
+  hint.addEventListener('click', () => { if (progress === 0 && !running) start(1); });
+
+  /* ---------- pointer parallax ---------- */
+  const mouse = { x: 0, y: 0, tx: 0, ty: 0 };
+  addEventListener('pointermove', e => {
+    mouse.tx = (e.clientX / innerWidth) * 2 - 1;
+    mouse.ty = 1 - (e.clientY / innerHeight) * 2;
+  }, { passive: true });
+
+  /* ---------- render loop ---------- */
+  let raf = 0, lastWorld = 0;
+  function render(now) {
+    const t = now / 1000 + 40;
+    mouse.x += (mouse.tx - mouse.x) * .04;
+    mouse.y += (mouse.ty - mouse.y) * .04;
+    // The world drifts slowly: 30fps is plenty and halves the GPU cost.
+    if (!lastWorld || now - lastWorld > 32) {
+      lastWorld = now;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, worldFbo);
+      gl.viewport(0, 0, worldW, worldH);
+      gl.useProgram(worldProg.p);
+      gl.uniform2f(worldProg.u.res, worldW, worldH);
+      gl.uniform1f(worldProg.u.T, t);
+      gl.uniform2f(worldProg.u.mouse, mouse.x, mouse.y);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    const u = exitProg.u;
+    gl.useProgram(exitProg.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, worldTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, titleTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, codeTex);
+    gl.uniform1i(u.world, 0); gl.uniform1i(u.titleTex, 1); gl.uniform1i(u.codeTex, 2);
+    gl.uniform2f(u.size, W, H);
+    gl.uniform1f(u.strength, exit.strength);
+    gl.uniform1f(u.phase, exit.phase);
+    gl.uniform1f(u.T, t);
+    gl.uniform1f(u.codeLines, CODE.length);
+    gl.uniform1f(u.codeWidth, CODE_W);
+    gl.uniform1f(u.lineH, LINE_H);
+    gl.uniform1f(u.amount, CONFIG.glitchAmount);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  function frame(now) {
+    raf = 0;
+    if (running) {
+      const n = clamp01((now - t0) / CONFIG.duration);
+      progress = target ? n : 1 - n;
+      if (n >= 1) { running = false; unlockAt = now + CONFIG.cooldown; }
+      apply(); hold();
+    }
+    const heroVisible = progress < 1 || running;
+    if (heroVisible) render(now);
+    if (heroVisible && !reduced) loop();
+  }
+  function loop() { if (!raf) raf = requestAnimationFrame(frame); }
+
+  /* ---------- boot ---------- */
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  scrollTo(0, 0);
+  if (reduced) {
+    root.classList.add('static');
+    stage.removeAttribute('data-entering');
+  }
+  const fontsReady = Promise.race([document.fonts?.ready ?? Promise.resolve(), new Promise(r => setTimeout(r, 1500))]);
+  fontsReady.then(() => {
+    buildCodeTexture();
+    resize();
+    if (!reduced) apply();
+    loop();
+  });
+  let resizeTimer = 0;
+  addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { resize(); if (root.classList.contains('static')) loop(); }, 120);
+  });
+  canvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault();
+    root.classList.add('static', 'no-gl');
+    stage.removeAttribute('data-entering');
+    hero.style.opacity = ''; hero.style.visibility = '';
+  });
+})();
+</script>
+</body>
+</html>
