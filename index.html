@@ -202,6 +202,8 @@
     cooldown: 140,      // ms of input lock after it finishes
     glitchAmount: 0.6,  // 0..1, how torn the frame gets
     codeReach: 150,     // px around the pointer where code glows brighter
+    wipeSize: 1,        // width of the brush that wipes the title away (1 = default)
+    wipeSeconds: 2.4,   // how long until wiped letters have fully come back
     titleVeil: 0.55,    // 0..1, how much drifting mist covers the title
   };
   // ?slow=10 plays the transition 10x slower, for inspecting frames.
@@ -758,17 +760,23 @@
     if (len < .5 || len > 300) return;
     const ux = mx / len, uy = my / len, amt = Math.min(len, 36);
     const R = Math.max(55, Math.min(110, Math.min(W, H) * .09)), c = push.cell;
+    const Rw = R * 1.6 * CONFIG.wipeSize;           // the wet brush is wider than the shove
+    const reach = Math.max(R, Rw) * 1.6;
     const cx = (x + prev.x) / 2, cy = (y + prev.y) / 2;
-    const c0 = Math.max(0, Math.floor((cx - R * 1.6) / c)), c1 = Math.min(push.cols - 1, Math.ceil((cx + R * 1.6) / c));
-    const r0 = Math.max(0, Math.floor((cy - R * 1.6) / c)), r1 = Math.min(push.rows - 1, Math.ceil((cy + R * 1.6) / c));
+    const c0 = Math.max(0, Math.floor((cx - reach) / c)), c1 = Math.min(push.cols - 1, Math.ceil((cx + reach) / c));
+    const r0 = Math.max(0, Math.floor((cy - reach) / c)), r1 = Math.min(push.rows - 1, Math.ceil((cy + reach) / c));
+    const stroke = Math.min(1, len / 6);
     for (let r = r0; r <= r1; r++) for (let q = c0; q <= c1; q++) {
-      const ox = (q + .5) * c - cx, oy = (r + .5) * c - cy;
-      const k = Math.exp(-(ox * ox + oy * oy) / (R * R * .5));
-      if (k < .01) continue;
+      const ox = (q + .5) * c - cx, oy = (r + .5) * c - cy, d2 = ox * ox + oy * oy;
+      const k = Math.exp(-d2 / (R * R * .5));
+      // Flat-topped brush: fully wet across most of its width, soft only at the rim.
+      const kw = Math.min(1, 1.6 * Math.exp(-d2 / (Rw * Rw * .5)));
+      if (k < .01 && kw < .01) continue;
       const i = r * push.cols + q;
       push.dx[i] += ux * amt * k * .5; push.dy[i] += uy * amt * k * .5;
       push.vx[i] += ux * amt * k * 4;  push.vy[i] += uy * amt * k * 4;
-      push.wet[i] = Math.min(1, Math.max(push.wet[i], k * Math.min(1, len / 8) * 1.2));
+      // Wetness tops out at 1.6 so the stroke holds for a while before it starts to dry.
+      push.wet[i] = Math.max(push.wet[i], 1.6 * kw * stroke);
       capShift(i);
     }
     push.active = true;
@@ -788,10 +796,10 @@
       }
       for (let i = 0; i < dx.length; i++) { dx[i] += vx[i] * s; dy[i] += vy[i] * s; capShift(i); }
     }
-    const dry = Math.exp(-h * 2.4);
+    const dry = h * 1.5 / CONFIG.wipeSeconds;     // linear drying: hold, then the letters seep back
     let peak = 0;
     for (let i = 0; i < dx.length; i++) {
-      wet[i] *= dry;
+      wet[i] = Math.max(0, wet[i] - dry);
       buf[i * 4] = dx[i]; buf[i * 4 + 1] = dy[i]; buf[i * 4 + 2] = wet[i];
       peak = Math.max(peak, Math.abs(dx[i]), Math.abs(dy[i]), Math.abs(vx[i]) * .1, Math.abs(vy[i]) * .1, wet[i] * 50);
     }

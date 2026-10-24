@@ -54,6 +54,8 @@ open index.html
 | `cooldown` | 转场结束后锁定输入的时长（毫秒） |
 | `glitchAmount` | 撕裂强度，0–1 |
 | `codeReach` | 光标周围代码变亮的半径（px） |
+| `wipeSize` | 抹开标题的笔刷宽度，1 为默认 |
+| `wipeSeconds` | 被抹开的字完全恢复需要的秒数 |
 | `titleVeil` | 标题上薄雾的浓度，0–1 |
 
 故障条里出现的代码在 `CODE` 数组里。在网址后面加 `?slow=10`，转场会慢放 10 倍，方便逐帧观察。
@@ -66,7 +68,7 @@ open index.html
 4. **溶解**：输出的 alpha 按方块逐渐变为 0，大致从底部开始、成片打开。因为用的是预乘 alpha，透明处直接露出下面的 HTML。
 5. **正文入场**：通过 CSS 变量 `--reveal` 驱动正文的淡入和上移。
 6. **代码轨迹**：屏幕划成等宽字符格，预先把整面代码墙画进一张纹理（R 通道是代码，G 通道是乱码）。鼠标路径上、以及鼠标静止时光标周围，会持续生成若干段代码，每段有头部、长度、速度和寿命。CPU 每帧把它们写进一张很小的 RG8 网格纹理，着色器按格子取代码墙，离光标越近颜色越亮。
-7. **推开标题**：一张粗网格（RGBA16F）上的每个格子是一个带阻尼的弹簧，并和相邻格子耦合。鼠标沿移动方向推动格子，推力像涟漪一样扩散，过冲后回弹，标题按这个位移采样。同一张纹理还有一个“湿笔刷”通道，标记鼠标划过的路径，加上纤维噪声就把字抹出毛边；不到一秒干掉后，字就回来了。
+7. **推开标题**：一张粗网格（RGBA16F）上的每个格子是一个带阻尼的弹簧，并和相邻格子耦合。鼠标沿移动方向推动格子，推力像涟漪一样扩散，过冲后回弹，标题按这个位移采样。同一张纹理还有一个“湿笔刷”通道，标记鼠标划过的路径，加上纤维噪声就把字抹出毛边；笔刷先保持一会儿，再线性变干，字从毛边处一点点渗回来（默认约 2.4 秒完全恢复）。
 
 ### 许可
 
@@ -118,6 +120,8 @@ Or serve it locally with `python3 -m http.server` and visit `http://localhost:80
 | `cooldown` | How long input stays locked after the transition, in ms |
 | `glitchAmount` | Tear intensity, 0–1 |
 | `codeReach` | Radius around the pointer where code glows brighter (px) |
+| `wipeSize` | Width of the brush that wipes the title away (1 = default) |
+| `wipeSeconds` | Seconds until wiped letters have fully come back |
 | `titleVeil` | How much drifting mist covers the title, 0–1 |
 
 The code shown inside the tears lives in the `CODE` array. Append `?slow=10` to the URL to play the transition 10× slower and inspect it frame by frame.
@@ -130,7 +134,7 @@ The code shown inside the tears lives in the `CODE` array. Append `?slow=10` to 
 4. **Dissolve**: output alpha falls to zero block by block, in ragged patches that roughly start from the bottom. Premultiplied alpha lets the HTML below show through.
 5. **Article entrance**: a CSS variable, `--reveal`, drives the article's fade and rise.
 6. **Code trails**: the screen is a monospace cell grid, and a full wall of code is pre-rendered into one texture (code in red, scramble glyphs in green). Runs keep spawning along the pointer's path and, while it rests, around it; each has a head, length, speed and lifetime. Every frame the CPU writes them into a tiny RG8 grid texture, and the shader reads the wall per cell, glowing brighter near the pointer.
-7. **Pushing the title**: each cell of a coarse RGBA16F grid is a damped spring coupled to its neighbours. The pointer shoves cells along its direction of travel, and the shove ripples outward, overshoots and settles. The title is sampled through that displacement. A second "wet brush" channel marks the pointer's path; with fibre noise it wipes the letters away with ragged edges, and they return once it dries out in under a second.
+7. **Pushing the title**: each cell of a coarse RGBA16F grid is a damped spring coupled to its neighbours. The pointer shoves cells along its direction of travel, and the shove ripples outward, overshoots and settles. The title is sampled through that displacement. A second "wet brush" channel marks the pointer's path; with fibre noise it wipes the letters away with ragged edges. The stroke holds for a moment, then dries linearly, and the letters seep back in from the ragged edges (fully back after about 2.4 s by default).
 
 ### License
 
