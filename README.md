@@ -6,6 +6,8 @@
 
 ![Hero](docs/hero.jpg)
 
+![Cursor trail](docs/cursor-trail.jpg)
+
 ![Transition](docs/transition.jpg)
 
 ---
@@ -20,6 +22,7 @@
 
 - **单个 HTML 文件**：没有构建步骤，也没有依赖，双击就能打开
 - **程序生成的雾山**：WebGL2 着色器实时绘制，不需要图片素材，鼠标移动有视差
+- **鼠标代码轨迹**：鼠标划过的地方，隐藏的代码墙会一段段亮起，像在打字一样向右延伸；头部字符先乱码闪烁再定格，尾巴变绿渐隐。在深色山体上清晰，在亮云里几乎消失
 - **故障转场**：粗、细两层撕裂带、横向拉丝、RGB 色散、重影，部分撕裂带上印着滚动的代码
 - **方块溶解**：画布透明度按块打开，露出下面真实的 DOM 正文（文字可选中，SEO 友好）
 - **可逆**：从正文滚回顶部会反向播放
@@ -59,6 +62,7 @@ open index.html
 3. **撕裂带**：每一行切成宽度随机的格子，由一层低频噪声决定哪些区域"活跃"，活跃格子做水平位移、拉丝和色散。
 4. **溶解**：输出的 alpha 按方块逐渐变为 0，大致从底部开始、成片打开。因为用的是预乘 alpha，透明处直接露出下面的 HTML。
 5. **正文入场**：通过 CSS 变量 `--reveal` 驱动正文的淡入和上移。
+6. **代码轨迹**：屏幕划成等宽字符格，预先把整面代码墙画进一张纹理（R 通道是代码，G 通道是乱码）。鼠标路径上随机生成若干段代码，每段有头部位置、长度、速度和寿命。CPU 每帧把它们写进一张很小的 RG8 网格纹理（亮度和头部程度），着色器按格子去取代码墙，并根据背景亮度调整可见度。
 
 ### 许可
 
@@ -78,6 +82,7 @@ Inspired by the hero transition on the Kimi K3.1 Pro tech-report page. This is a
 
 - **Single HTML file**: no build step and no dependencies, just open it
 - **Procedural misty mountains**: drawn live by a WebGL2 shader with no image assets, plus pointer parallax
+- **Cursor code trails**: wherever the mouse passes, runs of a hidden code wall light up and type themselves out to the right. The head scrambles before settling and the tail fades to green. Glyphs read clearly over dark rock and melt away into bright cloud
 - **Glitch transition**: two layers of tears (fine and coarse), horizontal smears, RGB split and ghosting, with scrolling code printed on some of the tears
 - **Block dissolve**: canvas alpha opens in blocks to reveal the real DOM article underneath (selectable text, SEO-friendly)
 - **Reversible**: scrolling back up from the article plays the transition backwards
@@ -117,6 +122,7 @@ The code shown inside the tears lives in the `CODE` array. Append `?slow=10` to 
 3. **Tears**: each row is split into cells of random width. A low-frequency noise field decides which areas are active, and active cells get shifted, smeared and colour-split.
 4. **Dissolve**: output alpha falls to zero block by block, in ragged patches that roughly start from the bottom. Premultiplied alpha lets the HTML below show through.
 5. **Article entrance**: a CSS variable, `--reveal`, drives the article's fade and rise.
+6. **Code trails**: the screen is a monospace cell grid, and a full wall of code is pre-rendered into one texture (code in red, scramble glyphs in green). Pointer movement spawns short runs, each with a head, length, speed and lifetime. Every frame the CPU writes them into a tiny RG8 grid texture (brightness and head-ness), and the shader reads the wall per cell, scaling visibility by the luminance behind it.
 
 ### License
 
