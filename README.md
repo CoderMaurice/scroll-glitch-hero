@@ -1,5 +1,7 @@
 # Scroll Glitch Hero
 
+**[在线演示 / Live demo →](https://codermaurice.github.io/scroll-glitch-hero/)**
+
 [中文](#中文) · [English](#english)
 
 ![Hero](docs/hero.jpg)
@@ -24,6 +26,10 @@
 - **降级处理**：开启"减少动态效果"或不支持 WebGL2 时，退回普通的静态滚动
 
 ### 使用
+
+在线体验：[https://codermaurice.github.io/scroll-glitch-hero/](https://codermaurice.github.io/scroll-glitch-hero/)（建议用电脑打开，往下滚一下；滚回顶部会反向播放）
+
+本地运行：
 
 ```bash
 git clone https://github.com/CoderMaurice/scroll-glitch-hero.git
@@ -78,6 +84,10 @@ Inspired by the hero transition on the Kimi K3.1 Pro tech-report page. This is a
 - **Graceful fallback**: with `prefers-reduced-motion` or without WebGL2 it falls back to a plain static page
 
 ### Usage
+
+Try it online: [https://codermaurice.github.io/scroll-glitch-hero/](https://codermaurice.github.io/scroll-glitch-hero/). A desktop browser works best: scroll down once, then scroll back to the top to see it reverse.
+
+Run locally:
 
 ```bash
 git clone https://github.com/CoderMaurice/scroll-glitch-hero.git
