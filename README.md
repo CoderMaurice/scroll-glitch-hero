@@ -22,9 +22,8 @@
 
 - **单个 HTML 文件**：没有构建步骤，也没有依赖，双击就能打开
 - **程序生成的雾山**：WebGL2 着色器实时绘制，不需要图片素材，鼠标移动有视差
-- **淡淡的代码层**：整个首屏铺着一层很淡的代码，一直都在，按缓慢漂移的斑块明暗起伏。在深色山体上看得清，在亮云里几乎消失
-- **鼠标搅动代码**：鼠标划过的地方，代码会稍微亮一点、颜色偏绿一点，并像打字一样向右延伸；头部字符会先乱码闪一下再定格
-- **雾气被推开**：标题上飘着一层薄雾，鼠标经过时把雾和文字往移动方向推开，字像烟一样散开，之后雾慢慢合拢
+- **鼠标代码轨迹**：鼠标经过的地方，隐藏的代码会一段段淡淡亮起，并像打字一样继续延伸、慢慢淡出，所以鼠标停下来代码也还在动；光标附近的代码会变成更亮的绿色。在深色山体上清晰，在亮云里几乎消失
+- **推开标题**：鼠标划过标题时，笔画沿路径像被湿笔刷抹开一样消失，边缘毛糙；周围的字被推向鼠标移动的方向，然后像果冻一样回弹、晃几下复位
 - **故障转场**：粗、细两层撕裂带、横向拉丝、RGB 色散、重影，部分撕裂带上印着滚动的代码
 - **方块溶解**：画布透明度按块打开，露出下面真实的 DOM 正文（文字可选中，SEO 友好）
 - **可逆**：从正文滚回顶部会反向播放
@@ -54,7 +53,7 @@ open index.html
 | `duration` | 转场时长（毫秒），默认 900 |
 | `cooldown` | 转场结束后锁定输入的时长（毫秒） |
 | `glitchAmount` | 撕裂强度，0–1 |
-| `codeAmbient` | 代码层平时的可见度，0–1 |
+| `codeReach` | 光标周围代码变亮的半径（px） |
 | `titleVeil` | 标题上薄雾的浓度，0–1 |
 
 故障条里出现的代码在 `CODE` 数组里。在网址后面加 `?slow=10`，转场会慢放 10 倍，方便逐帧观察。
@@ -66,8 +65,8 @@ open index.html
 3. **撕裂带**：每一行切成宽度随机的格子，由一层低频噪声决定哪些区域"活跃"，活跃格子做水平位移、拉丝和色散。
 4. **溶解**：输出的 alpha 按方块逐渐变为 0，大致从底部开始、成片打开。因为用的是预乘 alpha，透明处直接露出下面的 HTML。
 5. **正文入场**：通过 CSS 变量 `--reveal` 驱动正文的淡入和上移。
-6. **代码层**：屏幕划成等宽字符格，预先把整面代码墙画进一张纹理（R 通道是代码，G 通道是乱码）。代码平时的可见度由一层缓慢漂移的噪声控制。鼠标路径上随机生成若干段代码，CPU 每帧把它们写进一张很小的 RG8 网格纹理，被搅动的格子更亮、颜色偏绿。
-7. **推雾**：一张粗网格（RGBA16F）记录鼠标推动的位移和清开雾的程度。每次移动在光标周围按高斯分布叠加位移，每帧向邻格扩散并衰减。着色器用它扭曲标题和雾的采样位置，再加一点噪声做出烟丝感，并按清开程度减弱标题上的薄雾。
+6. **代码轨迹**：屏幕划成等宽字符格，预先把整面代码墙画进一张纹理（R 通道是代码，G 通道是乱码）。鼠标路径上、以及鼠标静止时光标周围，会持续生成若干段代码，每段有头部、长度、速度和寿命。CPU 每帧把它们写进一张很小的 RG8 网格纹理，着色器按格子取代码墙，离光标越近颜色越亮。
+7. **推开标题**：一张粗网格（RGBA16F）上的每个格子是一个带阻尼的弹簧，并和相邻格子耦合。鼠标沿移动方向推动格子，推力像涟漪一样扩散，过冲后回弹，标题按这个位移采样。同一张纹理还有一个“湿笔刷”通道，标记鼠标划过的路径，加上纤维噪声就把字抹出毛边；不到一秒干掉后，字就回来了。
 
 ### 许可
 
@@ -87,9 +86,8 @@ Inspired by the hero transition on the Kimi K3.1 Pro tech-report page. This is a
 
 - **Single HTML file**: no build step and no dependencies, just open it
 - **Procedural misty mountains**: drawn live by a WebGL2 shader with no image assets, plus pointer parallax
-- **Faint code layer**: a thin wall of code is always there across the hero, breathing in slowly drifting patches. It reads over dark rock and melts away into bright cloud
-- **Pointer stirs the code**: where the mouse passes, the code gets a little stronger and greener and types itself out to the right. Glyphs at the head scramble briefly before settling
-- **Mist pushed aside**: a veil of mist drifts across the title. The pointer shoves the mist and the letters along its path so they wisp like smoke, then the mist slowly closes back
+- **Cursor code trails**: wherever the mouse passes, hidden code lights up faintly in short runs that keep typing onward and fade over several seconds, so the code is still moving after the pointer stops. Code near the cursor glows a brighter green. It reads over dark rock and melts away into bright cloud
+- **Pushing the title**: as the mouse crosses the title, a wet brush-like stroke wipes the lettering away along its path with ragged edges, while nearby letters get shoved in the direction of travel, then spring back with a jelly-like wobble
 - **Glitch transition**: two layers of tears (fine and coarse), horizontal smears, RGB split and ghosting, with scrolling code printed on some of the tears
 - **Block dissolve**: canvas alpha opens in blocks to reveal the real DOM article underneath (selectable text, SEO-friendly)
 - **Reversible**: scrolling back up from the article plays the transition backwards
@@ -119,7 +117,7 @@ Or serve it locally with `python3 -m http.server` and visit `http://localhost:80
 | `duration` | Transition length in ms (default 900) |
 | `cooldown` | How long input stays locked after the transition, in ms |
 | `glitchAmount` | Tear intensity, 0–1 |
-| `codeAmbient` | How visible the code layer is at rest, 0–1 |
+| `codeReach` | Radius around the pointer where code glows brighter (px) |
 | `titleVeil` | How much drifting mist covers the title, 0–1 |
 
 The code shown inside the tears lives in the `CODE` array. Append `?slow=10` to the URL to play the transition 10× slower and inspect it frame by frame.
@@ -131,8 +129,8 @@ The code shown inside the tears lives in the `CODE` array. Append `?slow=10` to 
 3. **Tears**: each row is split into cells of random width. A low-frequency noise field decides which areas are active, and active cells get shifted, smeared and colour-split.
 4. **Dissolve**: output alpha falls to zero block by block, in ragged patches that roughly start from the bottom. Premultiplied alpha lets the HTML below show through.
 5. **Article entrance**: a CSS variable, `--reveal`, drives the article's fade and rise.
-6. **Code layer**: the screen is a monospace cell grid, and a full wall of code is pre-rendered into one texture (code in red, scramble glyphs in green). A slowly drifting noise sets how visible it is at rest. Pointer movement spawns short runs, which the CPU writes each frame into a tiny RG8 grid texture; stirred cells get brighter and greener.
-7. **Mist push**: a coarse RGBA16F grid stores how far the pointer has shoved things and how much mist it has cleared. Each move splats a Gaussian of displacement around the cursor, and each frame it diffuses to neighbours and decays. The shader offsets where the title and mist are sampled, adds a little noise for smoky wisps, and thins the title veil where it's been cleared.
+6. **Code trails**: the screen is a monospace cell grid, and a full wall of code is pre-rendered into one texture (code in red, scramble glyphs in green). Runs keep spawning along the pointer's path and, while it rests, around it; each has a head, length, speed and lifetime. Every frame the CPU writes them into a tiny RG8 grid texture, and the shader reads the wall per cell, glowing brighter near the pointer.
+7. **Pushing the title**: each cell of a coarse RGBA16F grid is a damped spring coupled to its neighbours. The pointer shoves cells along its direction of travel, and the shove ripples outward, overshoots and settles. The title is sampled through that displacement. A second "wet brush" channel marks the pointer's path; with fibre noise it wipes the letters away with ragged edges, and they return once it dries out in under a second.
 
 ### License
 

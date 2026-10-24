@@ -201,7 +201,7 @@
     duration: 900,      // ms the transition takes
     cooldown: 140,      // ms of input lock after it finishes
     glitchAmount: 0.6,  // 0..1, how torn the frame gets
-    codeAmbient: 0.06,  // 0..1, how visible the code layer is at rest
+    codeReach: 150,     // px around the pointer where code glows brighter
     titleVeil: 0.55,    // 0..1, how much drifting mist covers the title
   };
   // ?slow=10 plays the transition 10x slower, for inspecting frames.
@@ -323,7 +323,8 @@
   uniform float codeLines, codeWidth, lineH, amount;
   uniform sampler2D trailWall, trailGrid;  // wall: r = code glyphs, g = scramble glyphs
   uniform vec2 trailCell;                  // CSS px per character cell
-  uniform float ambient, titleVeil;
+  uniform float titleVeil, trailReach;
+  uniform vec2 pointer;                    // CSS px, top-down; far off-screen when absent
   uniform sampler2D pushField;
   uniform vec2 pushExtent;                 // CSS px covered by the push field
   const vec3 FOG   = vec3(.90,.915,.925);
@@ -336,48 +337,49 @@
   }
   float luma(vec3 c){ return dot(c, vec3(.299,.587,.114)); }
 
-  // The code layer: a monospace wall that is always faintly there. The grid
-  // holds how much the pointer has stirred each cell (r) and how close it is
-  // to a run's typing head (g); stirred cells read a little stronger and greener.
+  // Code trails: runs of a hidden monospace code wall, lit where the pointer has
+  // been. They keep typing onward and fade over several seconds, so the code
+  // drifts even while the pointer rests. Grid r = brightness, g = closeness to a
+  // run's typing head. Code near the pointer glows a brighter, lighter green.
   vec3 codeWall(vec3 c, vec2 uv){
     vec2 p = vec2(uv.x, 1.-uv.y)*size;    // top-down CSS px
     ivec2 cell = ivec2(p/trailCell);
     ivec2 dim = textureSize(trailGrid, 0);
     if(any(greaterThanEqual(cell, dim)) || any(lessThan(cell, ivec2(0)))) return c;
     vec2 g = texelFetch(trailGrid, cell, 0).rg;
-    // Resting visibility breathes in slow, drifting patches.
-    float rest = ambient*(.4 + .95*vnoise(vec2(cell)*vec2(.05,.13) + vec2(T*.06, -T*.04)));
-    float lit = rest + g.r*.5;
+    if(g.r <= .004) return c;
+    float near = 1.-smoothstep(0., trailReach, length(p - pointer));
     vec2 w = texture(trailWall, vec2(uv.x, 1.-uv.y)).rg;
     // Near a run's head, glyphs flip between code and noise before they settle.
     float flip = step(.45, hash12(vec2(cell) + floor(T*16.)))*step(.35, g.g);
     float glyph = mix(w.r, w.g, flip);
     // Read over dark rock, melt away into bright cloud.
-    float vis = .18 + .82*pow(clamp(1.-luma(c)*.92, 0., 1.), .85);
-    float s = clamp(lit*vis*1.9, 0., 1.);
-    vec3 calm = vec3(.38,.66,.47);         // resting: soft green
-    vec3 stirred = vec3(.20,.74,.38);      // pointer passed: a touch greener
-    vec3 ink = mix(calm, stirred, smoothstep(0.,.45,g.r));
-    ink = mix(ink, vec3(.74,.95,.82), .4*smoothstep(.3,.9,g.g));
+    float vis = .12 + .88*pow(clamp(1.-luma(c)*.92, 0., 1.), .9);
+    float s = clamp(g.r*vis*(1.1 + 1.1*near), 0., 1.);
+    vec3 tail = vec3(.26,.68,.30);
+    vec3 glow = vec3(.50,.96,.52);
+    vec3 ink = mix(tail, glow, max(near*.9, .5*smoothstep(.3,.9,g.g)));
     return mix(c, ink, glyph*s);
   }
 
   vec3 sceneAt(vec2 uv){
     uv = clamp(uv, 0., 1.);
     vec2 p = vec2(uv.x, 1.-uv.y)*size;
-    // Push field: xy = how far the pointer shoved things (CSS px, y down), z = mist cleared.
+    // Push field: xy = how far the springs shoved the title (CSS px, y down),
+    // z = a wet brush stroke along the pointer's path.
     vec4 f = texture(pushField, p/pushExtent);
-    vec2 d = vec2(f.x, -f.y)/size;
-    float m = min(length(f.xy), 26.);
-    vec2 wisp = (vec2(vnoise(p*.045 + T*.6), vnoise(p*.045 + 31.7 - T*.6)) - .5)*m*.6/size;
-    vec4 w = texture(world, clamp(uv - d*.35, 0., 1.));
-    vec4 t = texture(titleTex, clamp(uv - d - wisp, 0., 1.));   // premultiplied
-    // Mist drifting across the title; the pointer pushes it aside, it slowly closes back.
-    vec2 q = vec2(p.x/size.y*3.2 + T*.05, p.y/size.y*5.) - (f.xy/size.y)*4.;
+    vec4 w = texture(world, uv);
+    vec4 t = texture(titleTex, clamp(uv - vec2(f.x, -f.y)/size, 0., 1.));   // premultiplied
+    // The stroke wipes the lettering away with a ragged, fibrous edge; as it
+    // dries the letters return.
+    float fiber = .65*vnoise(p*.045) + .35*vnoise(p*.14 + 9.);
+    t *= 1.-smoothstep(.3, .7, f.z + (fiber-.5)*.6);
+    // Thin mist drifting across the title.
+    vec2 q = vec2(p.x/size.y*3.2 + T*.05, p.y/size.y*5.);
     float mist = smoothstep(.35,.8, .6*vnoise(q) + .4*vnoise(q*2.3 + 5.));
-    t *= 1. - titleVeil*mist*(1.-f.z);
+    t *= 1. - titleVeil*mist;
     vec3 base = codeWall(w.rgb, uv);
-    return mix(base*(1.-t.a) + t.rgb, FOG, w.a*.85*(1.-f.z*.6));
+    return mix(base*(1.-t.a) + t.rgb, FOG, w.a*.85);
   }
 
   // One row of variable-width cells; a patchy subset of them tears sideways.
@@ -621,7 +623,7 @@
   const SCRAMBLE = '01<>/\\{}[]=+*#%&$?!~^:;|_-';
   const trail = {
     cellW: 10, cellH: 18, cols: 1, rows: 1,
-    grid: new Uint8Array(2), runs: [], last: null, dirty: false,
+    grid: new Uint8Array(2), runs: [], last: null, pointer: null, dirty: false,
   };
 
   function buildTrailWall(w, h, dpr) {
@@ -660,12 +662,25 @@
     trail.runs.push({
       row,
       head: px / trail.cellW,
-      len: 10 + Math.random() * 16,     // cells of visible tail
-      speed: 5 + Math.random() * 7,     // cells per second
-      life: 3 + Math.random() * 2.2,    // seconds
+      len: 14 + Math.random() * 18,     // cells of visible tail
+      speed: 3 + Math.random() * 4,     // cells per second
+      life: 4 + Math.random() * 2.5,    // seconds
       age: 0,
     });
-    if (trail.runs.length > 240) trail.runs.shift();
+    if (trail.runs.length > 260) trail.runs.shift();
+  }
+
+  // While the pointer rests on the hero, keep a slow trickle of runs around it.
+  let idleBudget = 0;
+  function trickle(dt) {
+    const p = trail.pointer;
+    if (!p) return;
+    idleBudget += dt * 3;
+    while (idleBudget >= 1) {
+      idleBudget -= 1;
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random());
+      spawnRun(p.x + Math.cos(a) * r * 140 - 40, p.y + Math.sin(a) * r * 70);
+    }
   }
 
   function traceTo(px, py) {
@@ -709,71 +724,81 @@
   }
   function clearTrails() { trail.runs = []; trail.last = null; trail.dirty = true; }
 
-  /* ---------- push field ----------
-     A coarse grid of how far the pointer has shoved the mist (px) and how much
-     it has cleared it. Splats follow the pointer, then spread to neighbours and
-     relax back, so the title wobbles and the veil slowly drifts closed again. */
-  const push = { cell: 24, cols: 1, rows: 1, vx: null, vy: null, clr: null, tmp: null, buf: null, last: null, active: false };
+  /* ---------- title push ----------
+     A coarse grid of damped springs, each coupled to its neighbours. The
+     pointer shoves cells along its direction of travel; the shove spreads like
+     a ripple, overshoots and settles, dragging the lettering with it. A
+     separate "wet" channel marks where the stroke wiped through the title and
+     dries out in well under a second. */
+  const PUSH = { wave: 110, spring: 22, damping: 6, maxShift: 64 };
+  const push = { cell: 24, cols: 1, rows: 1, dx: null, dy: null, vx: null, vy: null, wet: null, buf: null, last: null, active: false };
 
   function buildPushField(w, h) {
     push.cell = Math.max(16, Math.min(w, h) / 34);
     push.cols = Math.ceil(w / push.cell) + 1;
     push.rows = Math.ceil(h / push.cell) + 1;
     const n = push.cols * push.rows;
-    push.vx = new Float32Array(n); push.vy = new Float32Array(n);
-    push.clr = new Float32Array(n); push.tmp = new Float32Array(n);
+    for (const k of ['dx', 'dy', 'vx', 'vy', 'wet']) push[k] = new Float32Array(n);
     push.buf = new Float32Array(n * 4);
     push.last = null; push.active = true;
+  }
+
+  function capShift(i) {
+    const m = Math.hypot(push.dx[i], push.dy[i]);
+    if (m <= PUSH.maxShift) return;
+    push.dx[i] *= PUSH.maxShift / m; push.dy[i] *= PUSH.maxShift / m;
+    push.vx[i] *= .5; push.vy[i] *= .5;
   }
 
   function pushAt(x, y) {
     const prev = push.last;
     push.last = { x, y };
     if (!prev) return;
-    const dx = x - prev.x, dy = y - prev.y, speed = Math.hypot(dx, dy);
-    if (speed < .5 || speed > 250) return;
-    const R = Math.max(60, Math.min(W, H) * .1), c = push.cell;
-    const c0 = Math.max(0, Math.floor((x - R) / c)), c1 = Math.min(push.cols - 1, Math.ceil((x + R) / c));
-    const r0 = Math.max(0, Math.floor((y - R) / c)), r1 = Math.min(push.rows - 1, Math.ceil((y + R) / c));
-    const clear = Math.min(1, speed / 25) * .3;
+    const mx = x - prev.x, my = y - prev.y, len = Math.hypot(mx, my);
+    if (len < .5 || len > 300) return;
+    const ux = mx / len, uy = my / len, amt = Math.min(len, 36);
+    const R = Math.max(55, Math.min(110, Math.min(W, H) * .09)), c = push.cell;
+    const cx = (x + prev.x) / 2, cy = (y + prev.y) / 2;
+    const c0 = Math.max(0, Math.floor((cx - R * 1.6) / c)), c1 = Math.min(push.cols - 1, Math.ceil((cx + R * 1.6) / c));
+    const r0 = Math.max(0, Math.floor((cy - R * 1.6) / c)), r1 = Math.min(push.rows - 1, Math.ceil((cy + R * 1.6) / c));
     for (let r = r0; r <= r1; r++) for (let q = c0; q <= c1; q++) {
-      const ox = (q + .5) * c - x, oy = (r + .5) * c - y;
-      const k = Math.exp(-(ox * ox + oy * oy) / (R * R * .45));
+      const ox = (q + .5) * c - cx, oy = (r + .5) * c - cy;
+      const k = Math.exp(-(ox * ox + oy * oy) / (R * R * .5));
       if (k < .01) continue;
       const i = r * push.cols + q;
-      push.vx[i] += dx * k * .3; push.vy[i] += dy * k * .3;
-      push.clr[i] = Math.min(1, push.clr[i] + k * clear);
+      push.dx[i] += ux * amt * k * .5; push.dy[i] += uy * amt * k * .5;
+      push.vx[i] += ux * amt * k * 4;  push.vy[i] += uy * amt * k * 4;
+      push.wet[i] = Math.min(1, Math.max(push.wet[i], k * Math.min(1, len / 8) * 1.2));
+      capShift(i);
     }
     push.active = true;
   }
 
-  // Blend each cell toward its 4-neighbour average: cheap diffusion.
-  function relax(a, keep, mix) {
-    const { cols, rows, tmp } = push;
-    for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
-      const i = r * cols + q;
-      const avg = (a[q > 0 ? i - 1 : i] + a[q < cols - 1 ? i + 1 : i] + a[r > 0 ? i - cols : i] + a[r < rows - 1 ? i + cols : i]) * .25;
-      tmp[i] = (a[i] + (avg - a[i]) * mix) * keep;
-    }
-    a.set(tmp);
-  }
-
   function advancePush(dt) {
     if (!push.active) return;
-    relax(push.vx, Math.exp(-dt * 2.4), .3);
-    relax(push.vy, Math.exp(-dt * 2.4), .3);
-    relax(push.clr, Math.exp(-dt * .55), .12);
-    let peak = 0;
-    for (let i = 0, n = push.vx.length; i < n; i++) {
-      const vx = Math.max(-26, Math.min(26, push.vx[i])), vy = Math.max(-26, Math.min(26, push.vy[i]));
-      push.vx[i] = vx; push.vy[i] = vy;
-      push.buf[i * 4] = vx; push.buf[i * 4 + 1] = vy; push.buf[i * 4 + 2] = push.clr[i]; push.buf[i * 4 + 3] = 0;
-      peak = Math.max(peak, Math.abs(vx), Math.abs(vy), push.clr[i] * 100);
+    const { cols, rows, dx, dy, vx, vy, wet, buf } = push;
+    const h = Math.min(dt, .1), steps = Math.max(1, Math.ceil(h * 120)), s = h / steps;
+    for (let n = 0; n < steps; n++) {
+      // Velocity from neighbour coupling (ripple), pull home (spring) and friction.
+      for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+        const i = r * cols + q;
+        const L = q > 0 ? i - 1 : i, Rt = q < cols - 1 ? i + 1 : i, U = r > 0 ? i - cols : i, D = r < rows - 1 ? i + cols : i;
+        vx[i] += ((dx[L] + dx[Rt] + dx[U] + dx[D] - 4 * dx[i]) * PUSH.wave - PUSH.spring * dx[i] - PUSH.damping * vx[i]) * s;
+        vy[i] += ((dy[L] + dy[Rt] + dy[U] + dy[D] - 4 * dy[i]) * PUSH.wave - PUSH.spring * dy[i] - PUSH.damping * vy[i]) * s;
+      }
+      for (let i = 0; i < dx.length; i++) { dx[i] += vx[i] * s; dy[i] += vy[i] * s; capShift(i); }
     }
+    const dry = Math.exp(-h * 2.4);
+    let peak = 0;
+    for (let i = 0; i < dx.length; i++) {
+      wet[i] *= dry;
+      buf[i * 4] = dx[i]; buf[i * 4 + 1] = dy[i]; buf[i * 4 + 2] = wet[i];
+      peak = Math.max(peak, Math.abs(dx[i]), Math.abs(dy[i]), Math.abs(vx[i]) * .1, Math.abs(vy[i]) * .1, wet[i] * 50);
+    }
+    if (peak < .02) { for (const a of [dx, dy, vx, vy, wet, buf]) a.fill(0); push.active = false; }
     gl.activeTexture(gl.TEXTURE5);
     gl.bindTexture(gl.TEXTURE_2D, pushTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, push.cols, push.rows, 0, gl.RGBA, gl.FLOAT, push.buf);
-    if (peak < .02) { push.vx.fill(0); push.vy.fill(0); push.clr.fill(0); push.active = push.buf.some(v => v !== 0); push.buf.fill(0); }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, cols, rows, 0, gl.RGBA, gl.FLOAT, buf);
   }
 
   /* ---------- sizing ---------- */
@@ -833,7 +858,7 @@
   }
   function start(to) {
     target = to; running = true; t0 = performance.now();
-    clearTrails(); push.last = null;
+    clearTrails(); trail.pointer = null; push.last = null;
     apply(); hold(); loop();
   }
 
@@ -862,12 +887,13 @@
     mouse.tx = (e.clientX / innerWidth) * 2 - 1;
     mouse.ty = 1 - (e.clientY / innerHeight) * 2;
     if (progress === 0 && !running && e.pointerType === 'mouse') {
+      trail.pointer = { x: e.clientX, y: e.clientY };
       traceTo(e.clientX, e.clientY);
       pushAt(e.clientX, e.clientY);
     }
   }, { passive: true });
-  const lose = () => { trail.last = null; push.last = null; };
-  document.addEventListener('pointerleave', lose);
+  const lose = () => { trail.last = null; trail.pointer = null; push.last = null; };
+  hero.addEventListener('pointerleave', lose);
   addEventListener('blur', lose);
 
   /* ---------- render loop ---------- */
@@ -876,6 +902,7 @@
     const t = now / 1000 + 40;
     const dt = lastFrame ? Math.min(.1, (now - lastFrame) / 1000) : 0;
     lastFrame = now;
+    if (progress === 0 && !running) trickle(dt);
     advanceTrails(dt);
     advancePush(dt);
     mouse.x += (mouse.tx - mouse.x) * .04;
@@ -906,7 +933,8 @@
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, pushTex);
     gl.uniform1i(u.pushField, 5);
     gl.uniform2f(u.pushExtent, push.cols * push.cell, push.rows * push.cell);
-    gl.uniform1f(u.ambient, CONFIG.codeAmbient);
+    gl.uniform1f(u.trailReach, CONFIG.codeReach);
+    gl.uniform2f(u.pointer, trail.pointer ? trail.pointer.x : -1e4, trail.pointer ? trail.pointer.y : -1e4);
     gl.uniform1f(u.titleVeil, CONFIG.titleVeil);
     gl.uniform2f(u.size, W, H);
     gl.uniform1f(u.strength, exit.strength);
