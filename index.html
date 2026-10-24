@@ -201,6 +201,8 @@
     duration: 900,      // ms the transition takes
     cooldown: 140,      // ms of input lock after it finishes
     glitchAmount: 0.6,  // 0..1, how torn the frame gets
+    codeAmbient: 0.06,  // 0..1, how visible the code layer is at rest
+    titleVeil: 0.55,    // 0..1, how much drifting mist covers the title
   };
   // ?slow=10 plays the transition 10x slower, for inspecting frames.
   CONFIG.duration *= Math.max(1, +new URLSearchParams(location.search).get('slow') || 1);
@@ -321,6 +323,9 @@
   uniform float codeLines, codeWidth, lineH, amount;
   uniform sampler2D trailWall, trailGrid;  // wall: r = code glyphs, g = scramble glyphs
   uniform vec2 trailCell;                  // CSS px per character cell
+  uniform float ambient, titleVeil;
+  uniform sampler2D pushField;
+  uniform vec2 pushExtent;                 // CSS px covered by the push field
   const vec3 FOG   = vec3(.90,.915,.925);
   const vec3 STEEL = vec3(.58,.70,.77);
 
@@ -331,33 +336,48 @@
   }
   float luma(vec3 c){ return dot(c, vec3(.299,.587,.114)); }
 
-  // Cursor trails: lit runs of a monospace code wall. The grid holds per-cell
-  // brightness (r) and how close the cell is to a run's typing head (g).
-  vec3 trails(vec3 c, vec2 uv){
+  // The code layer: a monospace wall that is always faintly there. The grid
+  // holds how much the pointer has stirred each cell (r) and how close it is
+  // to a run's typing head (g); stirred cells read a little stronger and greener.
+  vec3 codeWall(vec3 c, vec2 uv){
     vec2 p = vec2(uv.x, 1.-uv.y)*size;    // top-down CSS px
     ivec2 cell = ivec2(p/trailCell);
     ivec2 dim = textureSize(trailGrid, 0);
     if(any(greaterThanEqual(cell, dim)) || any(lessThan(cell, ivec2(0)))) return c;
     vec2 g = texelFetch(trailGrid, cell, 0).rg;
-    if(g.r <= .004) return c;
+    // Resting visibility breathes in slow, drifting patches.
+    float rest = ambient*(.4 + .95*vnoise(vec2(cell)*vec2(.05,.13) + vec2(T*.06, -T*.04)));
+    float lit = rest + g.r*.5;
     vec2 w = texture(trailWall, vec2(uv.x, 1.-uv.y)).rg;
-    // Near the head, glyphs flip between code and noise before they settle.
+    // Near a run's head, glyphs flip between code and noise before they settle.
     float flip = step(.45, hash12(vec2(cell) + floor(T*16.)))*step(.35, g.g);
     float glyph = mix(w.r, w.g, flip);
-    // Read clearly over dark rock, melt away into bright cloud.
+    // Read over dark rock, melt away into bright cloud.
     float vis = .18 + .82*pow(clamp(1.-luma(c)*.92, 0., 1.), .85);
-    float s = clamp(g.r*vis*1.9, 0., 1.);
-    vec3 tail = vec3(.24,.70,.33);
-    vec3 ink = mix(tail, mix(tail, vec3(1.), .7), smoothstep(.2,.9,g.g));
+    float s = clamp(lit*vis*1.9, 0., 1.);
+    vec3 calm = vec3(.38,.66,.47);         // resting: soft green
+    vec3 stirred = vec3(.20,.74,.38);      // pointer passed: a touch greener
+    vec3 ink = mix(calm, stirred, smoothstep(0.,.45,g.r));
+    ink = mix(ink, vec3(.74,.95,.82), .4*smoothstep(.3,.9,g.g));
     return mix(c, ink, glyph*s);
   }
 
   vec3 sceneAt(vec2 uv){
     uv = clamp(uv, 0., 1.);
-    vec4 w = texture(world, uv);
-    vec4 t = texture(titleTex, uv);       // premultiplied
-    vec3 base = trails(w.rgb, uv);
-    return mix(base*(1.-t.a) + t.rgb, FOG, w.a*.85);
+    vec2 p = vec2(uv.x, 1.-uv.y)*size;
+    // Push field: xy = how far the pointer shoved things (CSS px, y down), z = mist cleared.
+    vec4 f = texture(pushField, p/pushExtent);
+    vec2 d = vec2(f.x, -f.y)/size;
+    float m = min(length(f.xy), 26.);
+    vec2 wisp = (vec2(vnoise(p*.045 + T*.6), vnoise(p*.045 + 31.7 - T*.6)) - .5)*m*.6/size;
+    vec4 w = texture(world, clamp(uv - d*.35, 0., 1.));
+    vec4 t = texture(titleTex, clamp(uv - d - wisp, 0., 1.));   // premultiplied
+    // Mist drifting across the title; the pointer pushes it aside, it slowly closes back.
+    vec2 q = vec2(p.x/size.y*3.2 + T*.05, p.y/size.y*5.) - (f.xy/size.y)*4.;
+    float mist = smoothstep(.35,.8, .6*vnoise(q) + .4*vnoise(q*2.3 + 5.));
+    t *= 1. - titleVeil*mist*(1.-f.z);
+    vec3 base = codeWall(w.rgb, uv);
+    return mix(base*(1.-t.a) + t.rgb, FOG, w.a*.85*(1.-f.z*.6));
   }
 
   // One row of variable-width cells; a patchy subset of them tears sideways.
@@ -496,6 +516,7 @@
   const trailWallTex = texture(3), trailGridTex = texture(4);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const pushTex = texture(5);
   const worldFbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, worldFbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, worldTex, 0);
@@ -688,6 +709,73 @@
   }
   function clearTrails() { trail.runs = []; trail.last = null; trail.dirty = true; }
 
+  /* ---------- push field ----------
+     A coarse grid of how far the pointer has shoved the mist (px) and how much
+     it has cleared it. Splats follow the pointer, then spread to neighbours and
+     relax back, so the title wobbles and the veil slowly drifts closed again. */
+  const push = { cell: 24, cols: 1, rows: 1, vx: null, vy: null, clr: null, tmp: null, buf: null, last: null, active: false };
+
+  function buildPushField(w, h) {
+    push.cell = Math.max(16, Math.min(w, h) / 34);
+    push.cols = Math.ceil(w / push.cell) + 1;
+    push.rows = Math.ceil(h / push.cell) + 1;
+    const n = push.cols * push.rows;
+    push.vx = new Float32Array(n); push.vy = new Float32Array(n);
+    push.clr = new Float32Array(n); push.tmp = new Float32Array(n);
+    push.buf = new Float32Array(n * 4);
+    push.last = null; push.active = true;
+  }
+
+  function pushAt(x, y) {
+    const prev = push.last;
+    push.last = { x, y };
+    if (!prev) return;
+    const dx = x - prev.x, dy = y - prev.y, speed = Math.hypot(dx, dy);
+    if (speed < .5 || speed > 250) return;
+    const R = Math.max(60, Math.min(W, H) * .1), c = push.cell;
+    const c0 = Math.max(0, Math.floor((x - R) / c)), c1 = Math.min(push.cols - 1, Math.ceil((x + R) / c));
+    const r0 = Math.max(0, Math.floor((y - R) / c)), r1 = Math.min(push.rows - 1, Math.ceil((y + R) / c));
+    const clear = Math.min(1, speed / 25) * .3;
+    for (let r = r0; r <= r1; r++) for (let q = c0; q <= c1; q++) {
+      const ox = (q + .5) * c - x, oy = (r + .5) * c - y;
+      const k = Math.exp(-(ox * ox + oy * oy) / (R * R * .45));
+      if (k < .01) continue;
+      const i = r * push.cols + q;
+      push.vx[i] += dx * k * .3; push.vy[i] += dy * k * .3;
+      push.clr[i] = Math.min(1, push.clr[i] + k * clear);
+    }
+    push.active = true;
+  }
+
+  // Blend each cell toward its 4-neighbour average: cheap diffusion.
+  function relax(a, keep, mix) {
+    const { cols, rows, tmp } = push;
+    for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+      const i = r * cols + q;
+      const avg = (a[q > 0 ? i - 1 : i] + a[q < cols - 1 ? i + 1 : i] + a[r > 0 ? i - cols : i] + a[r < rows - 1 ? i + cols : i]) * .25;
+      tmp[i] = (a[i] + (avg - a[i]) * mix) * keep;
+    }
+    a.set(tmp);
+  }
+
+  function advancePush(dt) {
+    if (!push.active) return;
+    relax(push.vx, Math.exp(-dt * 2.4), .3);
+    relax(push.vy, Math.exp(-dt * 2.4), .3);
+    relax(push.clr, Math.exp(-dt * .55), .12);
+    let peak = 0;
+    for (let i = 0, n = push.vx.length; i < n; i++) {
+      const vx = Math.max(-26, Math.min(26, push.vx[i])), vy = Math.max(-26, Math.min(26, push.vy[i]));
+      push.vx[i] = vx; push.vy[i] = vy;
+      push.buf[i * 4] = vx; push.buf[i * 4 + 1] = vy; push.buf[i * 4 + 2] = push.clr[i]; push.buf[i * 4 + 3] = 0;
+      peak = Math.max(peak, Math.abs(vx), Math.abs(vy), push.clr[i] * 100);
+    }
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, pushTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, push.cols, push.rows, 0, gl.RGBA, gl.FLOAT, push.buf);
+    if (peak < .02) { push.vx.fill(0); push.vy.fill(0); push.clr.fill(0); push.active = push.buf.some(v => v !== 0); push.buf.fill(0); }
+  }
+
   /* ---------- sizing ---------- */
   let W = 1, H = 1, worldW = 1, worldH = 1;
   function resize() {
@@ -702,6 +790,7 @@
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, worldW, worldH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     buildTitleTexture(W, H, dpr);
     buildTrailWall(W, H, dpr);
+    buildPushField(W, H);
     lastWorld = 0;
   }
 
@@ -744,7 +833,7 @@
   }
   function start(to) {
     target = to; running = true; t0 = performance.now();
-    clearTrails();
+    clearTrails(); push.last = null;
     apply(); hold(); loop();
   }
 
@@ -772,10 +861,14 @@
   addEventListener('pointermove', e => {
     mouse.tx = (e.clientX / innerWidth) * 2 - 1;
     mouse.ty = 1 - (e.clientY / innerHeight) * 2;
-    if (progress === 0 && !running && e.pointerType === 'mouse') traceTo(e.clientX, e.clientY);
+    if (progress === 0 && !running && e.pointerType === 'mouse') {
+      traceTo(e.clientX, e.clientY);
+      pushAt(e.clientX, e.clientY);
+    }
   }, { passive: true });
-  document.addEventListener('pointerleave', () => { trail.last = null; });
-  addEventListener('blur', () => { trail.last = null; });
+  const lose = () => { trail.last = null; push.last = null; };
+  document.addEventListener('pointerleave', lose);
+  addEventListener('blur', lose);
 
   /* ---------- render loop ---------- */
   let raf = 0, lastWorld = 0, lastFrame = 0;
@@ -784,6 +877,7 @@
     const dt = lastFrame ? Math.min(.1, (now - lastFrame) / 1000) : 0;
     lastFrame = now;
     advanceTrails(dt);
+    advancePush(dt);
     mouse.x += (mouse.tx - mouse.x) * .04;
     mouse.y += (mouse.ty - mouse.y) * .04;
     // The world drifts slowly: 30fps is plenty and halves the GPU cost.
@@ -809,6 +903,11 @@
     gl.uniform1i(u.world, 0); gl.uniform1i(u.titleTex, 1); gl.uniform1i(u.codeTex, 2);
     gl.uniform1i(u.trailWall, 3); gl.uniform1i(u.trailGrid, 4);
     gl.uniform2f(u.trailCell, trail.cellW, trail.cellH);
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, pushTex);
+    gl.uniform1i(u.pushField, 5);
+    gl.uniform2f(u.pushExtent, push.cols * push.cell, push.rows * push.cell);
+    gl.uniform1f(u.ambient, CONFIG.codeAmbient);
+    gl.uniform1f(u.titleVeil, CONFIG.titleVeil);
     gl.uniform2f(u.size, W, H);
     gl.uniform1f(u.strength, exit.strength);
     gl.uniform1f(u.phase, exit.phase);
